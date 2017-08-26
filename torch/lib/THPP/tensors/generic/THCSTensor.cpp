@@ -65,6 +65,16 @@ auto THCSTensor<real>::newUnfold(int dimension, long size, long step) const -> T
 }
 
 template<>
+auto THCSTensor<real>::newExpand(const long_range& size) const -> THCSTensor* {
+  throw std::runtime_error("newExpand is not yet available for sparse tensors");
+}
+
+template<>
+auto THCSTensor<real>::newView(const long_range& size) const -> THCSTensor* {
+  throw std::runtime_error("newView is not yet available for sparse tensors");
+}
+
+template<>
 int THCSTensor<real>::nDim() const {
   return tensor->nDimensionI;
 }
@@ -606,12 +616,12 @@ auto THCSTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> TH
 }
 
 template<>
-auto THCSTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THCSTensor& {
+auto THCSTensor<real>::std(const Tensor& src, int dimension, int biased, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::std() not supported");
 }
 
 template<>
-auto THCSTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THCSTensor& {
+auto THCSTensor<real>::var(const Tensor& src, int dimension, int biased, int keepdim) -> THCSTensor& {
   throw std::runtime_error("THCSTensor::var() not supported");
 }
 
@@ -646,12 +656,12 @@ auto THCSTensor<real>::meanall() -> scalar_type {
 }
 
 template<>
-auto THCSTensor<real>::varall() -> scalar_type {
+auto THCSTensor<real>::varall(int biased) -> scalar_type {
   throw std::runtime_error("THCSTensor::varall() not supported");
 }
 
 template<>
-auto THCSTensor<real>::stdall() -> scalar_type {
+auto THCSTensor<real>::stdall(int biased) -> scalar_type {
   throw std::runtime_error("THCSTensor::stdall() not supported");
 }
 
@@ -785,6 +795,11 @@ auto THCSTensor<real>::minall() -> scalar_type {
 template<>
 auto THCSTensor<real>::maxall() -> scalar_type {
   throw std::runtime_error("THCSTensor::maxall() not supported");
+}
+
+template<>
+auto THCSTensor<real>::medianall() -> scalar_type {
+  throw std::runtime_error("THCSTensor::medianall() not supported");
 }
 
 template<>

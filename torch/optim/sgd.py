@@ -34,10 +34,10 @@ class SGD(Optimizer):
                   v = \rho * v + g \\
                   p = p - lr * v
 
-        where p, g, v and :math:`\rho` denote the parameters, gradient, velocity, and
-        momentum respectively.
+        where p, g, v and :math:`\rho` denote the parameters, gradient,
+        velocity, and momentum respectively.
 
-        This is in constrast to Sutskever et. al. and
+        This is in contrast to Sutskever et. al. and
         other frameworks which employ an update of the form
 
         .. math::

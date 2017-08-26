@@ -1,4 +1,5 @@
 import torch
+import warnings
 from . import _tensor_str
 from ._utils import _type, _cuda, _range, _rebuild_tensor
 import sys
@@ -9,6 +10,9 @@ class _TensorBase(object):
     is_cuda = False
     is_sparse = False
 
+    # NB: This implementation is CPU only; see THPTensor_(new) for the
+    # CUDA case, which handles constructing the tensor on the same GPU
+    # as this tensor.
     def new(self, *args, **kwargs):
         """Constructs a new tensor of the same data type."""
         return self.__class__(*args, **kwargs)
@@ -93,6 +97,14 @@ class _TensorBase(object):
         """
         return self.storage().is_shared()
 
+    @property
+    def shape(self):
+        """Alias for .size()
+
+        Returns a torch.Size object, containing the dimensions of the tensor
+        """
+        return self.size()
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:
@@ -142,7 +154,10 @@ class _TensorBase(object):
     __nonzero__ = __bool__
 
     def __iter__(self):
-        return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+        if self.nelement() > 0:
+            return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+        else:
+            return iter([])
 
     def split(self, split_size, dim=0):
         """Splits this tensor into a tuple of tensors.
@@ -157,6 +172,12 @@ class _TensorBase(object):
         See :func:`torch.chunk`.
         """
         return torch.chunk(self, n_chunks, dim)
+
+    def matmul(self, other):
+        """Matrix product of two tensors.
+
+        See :func:`torch.matmul`."""
+        return torch.matmul(self, other)
 
     def tolist(self):
         """Returns a nested list represenation of this tensor."""
@@ -220,7 +241,8 @@ class _TensorBase(object):
         Unlike :meth:`expand`, this function copies the tensor's data.
 
         Args:
-            *sizes (torch.Size or int...): The number of times to repeat this tensor along each dimension
+            *sizes (torch.Size or int...): The number of times to repeat this
+                tensor along each dimension
 
         Example:
             >>> x = torch.Tensor([1, 2, 3])
@@ -262,6 +284,10 @@ class _TensorBase(object):
         urtensor.copy_(xxtensor)
         return result
 
+    def masked_copy_(self, *args, **kwargs):
+        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
+        return self.masked_scatter_(*args, **kwargs)
+
     # TODO: add tests for operators
     def __add__(self, other):
         return self.add(other)
@@ -287,21 +313,9 @@ class _TensorBase(object):
         return self.mul_(other)
 
     def __matmul__(self, other):
-        dim_self = self.dim()
-        try:
-            dim_other = other.dim()
-        except AttributeError:  # not a tensor
+        if not torch.is_tensor(other):
             return NotImplemented
-        if dim_self == 1 and dim_other == 1:
-            return self.dot(other)
-        if dim_self == 2 and dim_other == 1:
-            return self.mv(other)
-        if dim_self == 1 and dim_other == 2:
-            return self.unsqueeze(0).mm(other).squeeze(0)
-        elif dim_self == 2 and dim_other == 2:
-            return self.mm(other)
-        raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
-                         "but they are {}D and {}D".format(dim_self, dim_other))
+        return self.matmul(other)
 
     def __pow__(self, other):
         return self.pow(other)
@@ -319,6 +333,7 @@ class _TensorBase(object):
 
     def __idiv__(self, other):
         return self.div_(other)
+    __itruediv__ = __idiv__
 
     def __mod__(self, other):
         return self.remainder(other)
@@ -352,6 +367,11 @@ class _TensorBase(object):
 
     def __hash__(self):
         return id(self)
+
+    # provide user guidance when they inavertently call autograd properties on a Tensor
+    @property
+    def data(self):
+        raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
 
 
 _TensorBase.type = _type

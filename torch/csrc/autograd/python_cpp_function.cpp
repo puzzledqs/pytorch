@@ -3,7 +3,6 @@
 #include <Python.h>
 #include <memory>
 #include <stdio.h>
-#include <THPP/THPP.h>
 #include <typeindex>
 #include <unordered_map>
 
@@ -53,7 +52,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     return THPVariable_Wrap(output[0]);
   }
 
-  THPObjectPtr tuple = PyTuple_New(num_outputs);
+  THPObjectPtr tuple(PyTuple_New(num_outputs));
   for (int i = 0; i != num_outputs; ++i) {
     PyTuple_SET_ITEM(tuple.get(), i, THPVariable_Wrap(output[i]));
   }
@@ -78,12 +77,18 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void *arg)
 
 int THPCppFunction_clear(PyObject* self)
 {
-  ((THPCppFunction*)self)->cdata.reset();
+  auto f = (THPCppFunction*)self;
+  // Remove the weak ref of the c++ object if it exist
+  if (f->cdata) {
+    f->cdata->pyobj = nullptr;
+  }
+  f->cdata.reset();
   return 0;
 }
 
 void THPCppFunction_dealloc(PyObject* self)
 {
+  THPCppFunction_clear(self);
   ((THPCppFunction*)self)->cdata.~shared_ptr();
   Py_TYPE(self)->tp_free(self);
 }
@@ -94,11 +99,11 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
 {
   auto& next_functions = self->cdata->next_functions;
   auto num_next = next_functions.size();
-  THPObjectPtr py_functions = PyTuple_New(num_next);
+  THPObjectPtr py_functions(PyTuple_New(num_next));
   if (!py_functions) return NULL;
   for (size_t i = 0; i < num_next; ++i) {
     auto& c_tuple = next_functions[i];
-    THPObjectPtr tuple = PyTuple_New(2);
+    THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple) return NULL;
     PyObject *py_fn = functionToPyObject(c_tuple.first);
     if (!py_fn) return NULL;
@@ -173,22 +178,27 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
     return obj;
   }
 
-  auto& fn = *cdata;
-  auto it = cpp_function_types.find(std::type_index(typeid(fn)));
-  if (it == cpp_function_types.end()) {
-    return PyErr_Format(PyExc_TypeError,
-        "Don't know how to create Python object for %s", typeid(fn).name());
+  if (cdata->pyobj) {
+    Py_INCREF(cdata->pyobj);
+  } else {
+    auto& fn = *cdata;
+    auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    if (it == cpp_function_types.end()) {
+      return PyErr_Format(PyExc_TypeError,
+          "Don't know how to create Python object for %s", typeid(fn).name());
+    }
+
+    PyTypeObject* type = (PyTypeObject*)it->second.get();
+    THPObjectPtr obj(type->tp_alloc(type, 0));
+    if (!obj) return NULL;
+    THPCppFunction* f = (THPCppFunction*)obj.get();
+    new (&f->cdata) std::shared_ptr<Function>(cdata);
+
+    // No INCREF here as we only have a weak reference
+    cdata->pyobj = obj.release();
   }
 
-  PyTypeObject* type = (PyTypeObject*)it->second.get();
-  THPObjectPtr obj = type->tp_alloc(type, 0);
-  if (!obj) return NULL;
-  THPCppFunction* f = (THPCppFunction*)obj.get();
-  new (&f->cdata) std::shared_ptr<Function>(cdata);
-  if (!f->cdata) {
-    return NULL;
-  }
-  return obj.release();
+  return cdata->pyobj;
 }
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype)
@@ -207,9 +217,9 @@ PyObject* registerFunctionHook(Function& fn, PyObject* hook)
     }
   }
 
-  THPObjectPtr register_fn = PyObject_GetAttrString(THPFunctionClass, "_register_hook");
+  THPObjectPtr register_fn(PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
   if (!register_fn) return NULL;
-  THPObjectPtr res = PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, NULL);
+  THPObjectPtr res(PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, NULL));
   if (!res) return NULL;
 
   if (dict == Py_None) {

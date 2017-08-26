@@ -89,6 +89,26 @@ auto THTensor<real>::newUnfold(int dimension, long size, long step) const -> THT
 }
 
 template<>
+auto THTensor<real>::newExpand(const long_range& size) const -> THTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  // TODO this might leak on error
+  auto expanded = new THTensor(THTensor_(newExpand)(tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return expanded;
+}
+
+template<>
+auto THTensor<real>::newView(const long_range& size) const -> THTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  // TODO this might leak on error
+  auto viewed = new THTensor(THTensor_(newView)(tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return viewed;
+}
+
+template<>
 int THTensor<real>::nDim() const {
   return tensor->nDimension;
 }
@@ -986,9 +1006,9 @@ auto THTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THTe
 }
 
 template<>
-auto THTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THTensor& {
+auto THTensor<real>::std(const Tensor& src, int dimension, int biased, int keepdim) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THTensor_(std)(tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
+  THTensor_(std)(tensor, const_tensor_cast(src).tensor, dimension, biased, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -997,9 +1017,9 @@ auto THTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim
 }
 
 template<>
-auto THTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THTensor& {
+auto THTensor<real>::var(const Tensor& src, int dimension, int biased, int keepdim) -> THTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THTensor_(var)(tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
+  THTensor_(var)(tensor, const_tensor_cast(src).tensor, dimension, biased, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -1086,9 +1106,9 @@ auto THTensor<real>::meanall() -> scalar_type {
 }
 
 template<>
-auto THTensor<real>::varall() -> scalar_type{
+auto THTensor<real>::varall(int biased) -> scalar_type{
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return THTensor_(varall)(tensor);
+  return THTensor_(varall)(tensor, biased);
 #else
   throw std::runtime_error("floating point functions are available only for\
       floating point tensors");
@@ -1096,9 +1116,9 @@ auto THTensor<real>::varall() -> scalar_type{
 }
 
 template<>
-auto THTensor<real>::stdall() -> scalar_type {
+auto THTensor<real>::stdall(int biased) -> scalar_type {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return THTensor_(stdall)(tensor);
+  return THTensor_(stdall)(tensor, biased);
 #else
   throw std::runtime_error("floating point functions are available only for\
       floating point tensors");
@@ -1351,6 +1371,11 @@ auto THTensor<real>::minall() -> scalar_type {
 template<>
 auto THTensor<real>::maxall() -> scalar_type {
   return THTensor_(maxall)(tensor);
+}
+
+template<>
+auto THTensor<real>::medianall() -> scalar_type {
+  return THTensor_(medianall)(tensor);
 }
 
 template<>

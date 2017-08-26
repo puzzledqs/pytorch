@@ -1,23 +1,25 @@
 #pragma once
 
 // Function is an abstract class that represents a single operation from one or
-// more variables to one more or varaibles.
+// more variables to one more or variables.
 //
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
-#include <memory>
-#include <THPP/THPP.h>
-#include <vector>
-
+#include <Python.h>
 #include "torch/csrc/autograd/function_hook.h"
+
+#include <ATen/ATen.h>
+
+#include <memory>
+#include <vector>
 
 namespace torch { namespace autograd {
 
 struct Function;
 struct Variable;
 
-using tensor_list = std::vector<std::unique_ptr<thpp::Tensor>>;
+using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<std::shared_ptr<Variable>>;
 using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
@@ -31,6 +33,7 @@ struct FunctionFlags {
   bool is_executable = false;
   bool is_volatile = false;
   // What functions take the output of this function as input.
+  // There is one function per output of this function.
   function_list next_functions;
 };
 
@@ -42,6 +45,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(FunctionFlags&& flags)
@@ -51,6 +55,7 @@ struct Function {
     , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
+    , pyobj(nullptr)
     {}
 
   Function(const Function& other) = delete;
@@ -86,6 +91,8 @@ struct Function {
   bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
+
+  PyObject *pyobj;  // weak reference
 };
 
 

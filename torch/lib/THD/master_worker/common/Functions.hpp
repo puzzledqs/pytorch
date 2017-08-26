@@ -12,6 +12,9 @@ enum Functions: std::uint16_t {
   generatorSeed,
   generatorManualSeed,
 
+  tensorCopyFromMaster,
+  tensorCopyFromWorker,
+
   tensorNew,
   tensorNewWithTensor,
   tensorNewWithSize,
@@ -84,6 +87,7 @@ enum Functions: std::uint16_t {
   tensorDot,
   tensorMinall,
   tensorMaxall,
+  tensorMedianall,
   tensorSumall,
   tensorProdall,
   tensorNeg,
@@ -237,6 +241,8 @@ enum Functions: std::uint16_t {
   // communication requests
   sendTensor,
   sendStorage,
+
+  exit
 };
 
 } // namespace thd

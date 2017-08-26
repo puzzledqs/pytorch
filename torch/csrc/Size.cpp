@@ -25,7 +25,7 @@ PyObject * THPSize_New(int dim, long *sizes)
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-  THPObjectPtr self = PyTuple_Type.tp_new(type, args, kwargs);
+  THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
@@ -56,13 +56,12 @@ extern PyTypeObject THPSizeType;
 template<typename FnType, FnType fn, typename ...Args>
 static PyObject* wrap_tuple_fn(Args ... args)
 {
-  PyObject *result = (*fn)(std::forward<Args>(args)...);
+  THPObjectPtr result((*fn)(std::forward<Args>(args)...));
   if (!result) return NULL;
-  if (PyTuple_Check(result)) {
-    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result, NULL);
+  if (PyTuple_Check(result.get())) {
+    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), NULL);
   }
-  Py_INCREF(result);
-  return result;
+  return result.release();
 }
 
 static auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;

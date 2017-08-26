@@ -10,7 +10,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 
 // (class, gpu id, sizes)
-using output_info_type = std::tuple<PyObject *, int, std::vector<long>>;
+using output_info_type = std::tuple<PyObject *, int, std::vector<int64_t>>;
 
 namespace torch { namespace autograd {
 
@@ -61,8 +61,6 @@ struct THPFunction {
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.
-    // You can use cdata directly if you don't actually need a shared_ptr.
-    std::weak_ptr<torch::autograd::PyFunction> cdata_ptr;
     torch::autograd::PyFunction cdata;
 };
 
@@ -70,6 +68,7 @@ bool THPFunction_initModule(PyObject *module);
 extern PyTypeObject THPFunctionType;
 extern PyObject *THPFunctionClass;
 extern PyObject *THPStochasticFunctionClass;
+extern PyObject *THPBatchNormBackwardBackwardFunction;  // Temporarily here until we move it to C++
 
 // XXX: this function requires the GIL (it can have side effects).
 std::shared_ptr<torch::autograd::PyFunction> THPFunction_asFunction(THPFunction* self);

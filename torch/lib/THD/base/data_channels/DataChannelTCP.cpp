@@ -16,8 +16,6 @@
 namespace thd {
 namespace {
 
-constexpr rank_type MASTER_RANK = 0;
-
 inline std::uint32_t log2ceil(std::uint32_t value) {
   std::uint32_t dim = 0;
 #if defined(__GNUC__)
@@ -60,41 +58,36 @@ void DataChannelTCP::RequestTCP::wait() {
 }
 
 
-DataChannelTCP::DataChannelTCP()
-  : DataChannelTCP(-1)
+DataChannelTCP::DataChannelTCP(InitMethod::Config config)
+  : DataChannelTCP(config, -1)
 {}
 
 
-DataChannelTCP::DataChannelTCP(int timeout)
+DataChannelTCP::DataChannelTCP(InitMethod::Config config, int timeout)
   : _socket(-1)
   , _port(0)
   , _timeout(timeout)
+  , _processes(config.world_size)
   , _poll_events(nullptr)
 {
-  _rank = load_rank_env();
+  _rank = config.rank;
 
-  if (_rank == MASTER_RANK) { // MASTER
-    rank_type processes_number;
-    std::tie(_port, processes_number) = load_master_env();
+  if (_rank == 0) { // MASTER
+    _socket = config.master.listen_socket;
+    _port = config.master.listen_port;
 
-    _processes.resize(processes_number);
-    _processes[_rank] = {
-      .rank = _rank,
+    _processes[0] = {
+      .rank = 0,
       .address = "",
       .port = 0,
       .socket = -1,
     };
   } else { // WORKER
-    std::string address;
-    port_type port;
-    std::tie(address, port) = load_worker_env();
-
     // add master
-    _processes.resize(1);
-    _processes[MASTER_RANK] = {
-      .rank = MASTER_RANK,
-      .address = address,
-      .port = port,
+    _processes[0] = {
+      .rank = 0,
+      .address = config.worker.master_addr,
+      .port = config.worker.master_port,
       .socket = -1,
     };
   }
@@ -114,43 +107,26 @@ DataChannelTCP::~DataChannelTCP()
 
 
 bool DataChannelTCP::initWorker() {
-  auto& master = _processes[MASTER_RANK];
+  auto& master = _processes[0];
   master.socket = connect(master.address, master.port);
-  int master_socket = master.socket;
 
   std::tie(_socket, _port) = listen();
 
-  send_bytes<rank_type>(master_socket, &_rank, 1, true);
-  send_bytes<port_type>(master_socket, &_port, 1); // send listening port to master
-
-  rank_type processes_number;
-  recv_bytes<rank_type>(master_socket, &processes_number, 1);
-  _processes.resize(processes_number);
+  send_value<rank_type>(master.socket, _rank, true);
+  send_value<port_type>(master.socket, _port); // send listening port to master
 
   // get all metadata of other processes in network
-  processes_number--; // exclude master
-  while (processes_number > 0) {
-    std::uint32_t p_address_len;
-    rank_type p_rank;
-    port_type p_port;
-
-    recv_bytes<rank_type>(master_socket, &p_rank, 1); // get process rank
-    recv_bytes<std::uint32_t>(master_socket, &p_address_len, 1); // get process address length
-
-    // get process address
-    std::unique_ptr<char[]> tmp_address(new char[p_address_len + 1]);
-    recv_bytes<char>(master_socket, tmp_address.get(), p_address_len);
-
-    recv_bytes<port_type>(master_socket, &p_port, 1); // get process port
+  for (std::size_t i = 1; i < _processes.size(); ++i) {
+    rank_type p_rank = recv_value<rank_type>(master.socket);
+    port_type p_port = recv_value<port_type>(master.socket);
+    std::string p_address = recv_string(master.socket);
 
     _processes[p_rank] = {
       .rank = p_rank,
-      .address = std::string(tmp_address.get(), p_address_len),
+      .address = p_address,
       .port = p_port,
       .socket = -1,
     };
-
-    processes_number--;
   }
 
   /*
@@ -166,7 +142,7 @@ bool DataChannelTCP::initWorker() {
     process.socket = connect(process.address, process.port);
 
     // send rank to tell to the accepting process who we are
-    send_bytes<rank_type>(process.socket, &_rank, 1);
+    send_value<rank_type>(process.socket, _rank);
   }
 
   for (rank_type i = _rank + 1; i < _processes.size(); ++i) {
@@ -174,9 +150,7 @@ bool DataChannelTCP::initWorker() {
     std::tie(socket, std::ignore) = accept(_socket, _timeout);
 
     // get rank of process we have just accepted
-    rank_type p_rank;
-    recv_bytes<rank_type>(socket, &p_rank, 1);
-
+    rank_type p_rank = recv_value<rank_type>(socket);
     _processes[p_rank].socket = socket;
   }
 
@@ -189,19 +163,14 @@ bool DataChannelTCP::initWorker() {
 
 
 bool DataChannelTCP::initMaster() {
-  std::tie(_socket, std::ignore) = listen(_port);
-
   // wait for all workers to connect
-  std::size_t workers = _processes.size() - 1;
-  while (workers > 0) {
+  for (std::size_t i = 1; i < _processes.size(); ++i) {
     std::string p_address;
     int p_socket;
     std::tie(p_socket, p_address) = accept(_socket, _timeout);
 
-    rank_type p_rank;
-    port_type p_port;
-    recv_bytes<rank_type>(p_socket, &p_rank, 1);
-    recv_bytes<port_type>(p_socket, &p_port, 1);
+    rank_type p_rank = recv_value<rank_type>(p_socket);
+    port_type p_port = recv_value<port_type>(p_socket);
 
     if (p_rank >= _processes.size()) {
       throw std::out_of_range(
@@ -223,25 +192,18 @@ bool DataChannelTCP::initMaster() {
       .port = p_port,
       .socket = p_socket,
     };
-
-    workers--;
   }
 
   // send informations about processes to all workers
   for (const auto& worker : _processes) {
-    if (worker.rank == _rank) continue;
-
-    rank_type processes_number = _processes.size();
-    send_bytes<rank_type>(worker.socket, &processes_number, 1, true);
+    if (worker.rank == 0) continue;
 
     for (auto& process : _processes) {
-      if (process.rank == _rank) continue;
+      if (process.rank == 0) continue;
 
-      std::uint32_t proc_address_length = process.address.size();
-      send_bytes<rank_type>(worker.socket, &process.rank, 1, true);
-      send_bytes<std::uint32_t>(worker.socket, &proc_address_length, 1, true);
-      send_bytes<char>(worker.socket, process.address.data(), proc_address_length, true);
-      send_bytes<port_type>(worker.socket, &process.port, 1);
+      send_value<rank_type>(worker.socket, process.rank, true);
+      send_value<port_type>(worker.socket, process.port, true);
+      send_string(worker.socket, process.address);
     }
   }
 
@@ -254,7 +216,7 @@ bool DataChannelTCP::initMaster() {
 
 
 bool DataChannelTCP::init() {
-  bool ok = (_rank == MASTER_RANK ? initMaster() : initWorker());
+  bool ok = (_rank == 0 ? initMaster() : initWorker());
   if (ok) {
     std::vector<rank_type> ranks;
     ranks.reserve(_processes.size());
@@ -315,7 +277,7 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
 
   auto j = group_rank, jnext = left;
   for (rank_type i = 0; i < group.size(); ++i) {
-    auto send_request = isend(*(output[j]), group.mustGetGlobalRank(right));
+    req_ptr send_request {isend(*(output[j]), group.mustGetGlobalRank(right))};
     receive(*(output[jnext]), group.mustGetGlobalRank(left));
     send_request->wait();
 
@@ -447,7 +409,7 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
       int dst = (newdst < rem) ? (newdst * 2 + 1) : (newdst + rem);
 
       auto dst_global_rank = group.mustGetGlobalRank(dst);
-      auto send_request = isend(data, dst_global_rank);
+      req_ptr send_request {isend(data, dst_global_rank)};
       receive(*tmp_tensor, dst_global_rank);
       send_request->wait();
 
@@ -561,7 +523,7 @@ void DataChannelTCP::broadcast(thpp::Tensor& data, rank_type src_rank,
 }
 
 
-void DataChannelTCP::send(const Scalar& data, rank_type dst_rank) {
+void DataChannelTCP::send(Scalar& data, rank_type dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
   });

@@ -1,8 +1,8 @@
 #pragma once
 
+#include <Python.h>
 #include <memory>
 #include <string>
-#include <THPP/THPP.h>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -32,6 +32,20 @@ struct DelayedError : public Function {
   std::string msg;
 };
 
+struct GraphRoot : public Function {
+  GraphRoot(function_list functions, variable_list inputs)
+    : outputs(std::move(inputs)) {
+      next_functions = std::move(functions);
+      is_executable = true;
+    };
+
+  virtual variable_list apply(const variable_list& inputs) {
+    return outputs;
+  }
+
+  variable_list outputs;
+};
+
 struct Add : public Function {
   Add() {}
 
@@ -47,4 +61,3 @@ struct AddBackward : public Function {
 };
 
 }}
-

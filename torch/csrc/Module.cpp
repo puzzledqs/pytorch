@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <libshm.h>
 #include <TH/TH.h>
+#include <ATen/ATen.h>
 
 #include "torch/csrc/utils/python_strings.h"
 
@@ -63,7 +64,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
 {
   static std::vector<std::string> names;
 
-  THPObjectPtr types = PySequence_Fast(arg, "expected a sequence");
+  THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
   if (!types) return NULL;
 
   int num_classes = PySequence_Fast_GET_SIZE(types.get());
@@ -73,7 +74,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = (PyTypeObject*)obj;
 
-    THPObjectPtr module_name = PyObject_GetAttrString(obj, "__module__");
+    THPObjectPtr module_name(PyObject_GetAttrString(obj, "__module__"));
     if (!module_name) return NULL;
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
@@ -279,7 +280,9 @@ IMPLEMENT_STATELESS(atan2)
 IMPLEMENT_STATELESS(pow)
 IMPLEMENT_STATELESS(lerp)
 IMPLEMENT_STATELESS(zeros)
+IMPLEMENT_STATELESS(zeros_like)
 IMPLEMENT_STATELESS(ones)
+IMPLEMENT_STATELESS(ones_like)
 IMPLEMENT_STATELESS(index_select)
 IMPLEMENT_STATELESS(addmm)
 IMPLEMENT_STATELESS(addmv)
@@ -466,6 +469,66 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 }
 
+
+PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
+  THPUtils_assert(num_args == 2, "expected exactly 2 arguments");
+  PyObject *arg1 = PyTuple_GET_ITEM(args, 0);
+  THPUtils_assert(THPSize_Check(arg1), "expected a torch.Size as argument 1");
+  PyObject *arg2 = PyTuple_GET_ITEM(args, 1);
+  THPUtils_assert(THPSize_Check(arg2), "expected a torch.Size as argument 2");
+
+  THLongStoragePtr size1_guard = THPUtils_unpackSize(arg1);
+  THLongStorage *size1 = size1_guard.get();
+  THLongStoragePtr size2_guard = THPUtils_unpackSize(arg2);
+  THLongStorage *size2 = size2_guard.get();
+  THLongStoragePtr sizes_guard(THLongStorage_new());
+  THLongStorage *sizes = sizes_guard.get();
+
+  char error_buffer[1024];
+  int ret = THLongStorage_inferSize2(sizes, size1->data, size1->size, size2->data, size2->size, error_buffer, 1024);
+  THPUtils_assert(ret == 0, error_buffer);
+  return THPSize_New(sizes->size, sizes->data);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *THPModule_setBackcompatBroadcastWarn(PyObject *module, PyObject *arg) {
+  THPUtils_assert(PyBool_Check(arg), "set_backcompat_broadcast_warn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  setBackCompatBroadcastWarn(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module)
+{
+  if (getBackCompatBroadcastWarn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
+static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *arg) {
+  THPUtils_assert(PyBool_Check(arg), "set_backcompat_keepdim_warn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  setBackCompatKeepdimWarn(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
+{
+  if (getBackCompatKeepdimWarn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_hasDistributed(PyObject *_unused)
+{
+#ifdef WITH_DISTRIBUTED
+  Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCPModule_initExtension(PyObject *self);
 extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
@@ -498,6 +561,7 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
   {"_sparse_init",    (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
+  {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
 #ifdef WITH_CUDA
   {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
@@ -524,6 +588,11 @@ static PyMethodDef TorchMethods[] = {
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
+  {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
+  {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
+  {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
+  {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, NULL},
+  {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
@@ -604,7 +673,9 @@ static PyMethodDef TorchMethods[] = {
   {"pow",             (PyCFunction)THPModule_pow,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"lerp",            (PyCFunction)THPModule_lerp,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"zeros",           (PyCFunction)THPModule_zeros,             METH_VARARGS | METH_KEYWORDS, NULL},
+  {"zeros_like",      (PyCFunction)THPModule_zeros_like,        METH_VARARGS | METH_KEYWORDS, NULL},
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"ones_like",       (PyCFunction)THPModule_ones_like,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS | METH_KEYWORDS, NULL},
@@ -653,22 +724,6 @@ static PyMethodDef TorchMethods[] = {
   {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
-
-static void errorHandler(const char *msg, void *data)
-{
-  throw THException(msg);
-}
-
-static void errorHandlerArg(int argNumber, const char *msg, void *data)
-{
-  throw THArgException(msg, argNumber);
-}
-
-static void updateErrorHandlers()
-{
-  THSetDefaultErrorHandler(errorHandler, NULL);
-  THSetDefaultArgErrorHandler(errorHandlerArg, NULL);
-}
 
 bool THCPDoubleStorage_init(PyObject *module);
 bool THCPFloatStorage_init(PyObject *module);
@@ -729,6 +784,7 @@ PyMODINIT_FUNC init_C()
 PyMODINIT_FUNC PyInit__C()
 #endif
 {
+  THInferNumThreads();
 
 #if PY_MAJOR_VERSION == 2
 #define ASSERT_TRUE(cmd) if (!(cmd)) {PyErr_SetString(PyExc_ImportError, "initialization error"); return;}
@@ -833,8 +889,7 @@ PyMODINIT_FUNC PyInit__C()
   Py_INCREF(has_cudnn);
   ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
 
-  // TODO THD: enable once master-worker mode is implemented
-#if 0 && defined(WITH_DISTRIBUTED)
+#ifdef WITH_DISTRIBUTED_MW
   // See comment on CUDA objects
   ASSERT_TRUE(THDPDoubleStorage_init(module));
   ASSERT_TRUE(THDPFloatStorage_init(module));
@@ -859,7 +914,9 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPDefaultGenerator != nullptr);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
-  updateErrorHandlers();
+  // force ATen to initialize because it handles
+  // setting up TH Errors so that they throw C++ exceptions
+  at::init();
 
 #ifdef WITH_NUMPY
   import_array();

@@ -1,4 +1,4 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 ################################################################################
@@ -18,6 +18,25 @@ FUNCTION(EXCLUDE_DIR list_name dir_name)
 ENDFUNCTION()
 
 ################################################################################
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+INCLUDE(CheckCXXSourceCompiles)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <thread>
+
+thread_local int foo=1;
+
+int main() {
+  return 0;
+}" HAS_THREAD_LOCAL)
+
+IF(NOT HAS_THREAD_LOCAL)
+    MESSAGE(FATAL_ERROR "thread_local not supported. THD requires a compiler"
+                        " that supports thread_local. Please upgrade your "
+                        "compiler. If you are on OSX, upgrade to "
+                        "XCode 8 or newer.")
+ENDIF(NOT HAS_THREAD_LOCAL)
 
 FIND_PACKAGE(MPI)
 
@@ -64,6 +83,11 @@ ENDIF()
 
 ADD_DEFINITIONS(-D_THD_CORE=1)
 
+IF ($ENV{TH_BINARY_BUILD})
+  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
+  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+ENDIF()
+
 # Can be compiled standalone
 IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE_DIR)
   SET(THD_INSTALL_BIN_DIR "bin" CACHE PATH "THD install binary subdirectory")
@@ -88,6 +112,7 @@ IF(NOT GLOO_FOUND)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelGloo.cpp")
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/Store.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_store.cpp")
+  LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
@@ -100,7 +125,6 @@ EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
 ADD_LIBRARY(THD SHARED ${all_cpp})
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
 IF(THD_SO_VERSION)
   MESSAGE(STATUS "THD_SO_VERSION: ${THD_SO_VERSION}")
@@ -109,14 +133,14 @@ IF(THD_SO_VERSION)
     SOVERSION ${THD_SO_VERSION})
 ENDIF(THD_SO_VERSION)
 
-TARGET_LINK_LIBRARIES(THD PRIVATE ${TH_LIBRARIES} ${THPP_LIBRARIES})
+TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${TH_LIBRARIES} ${THPP_LIBRARIES})
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(THD PRIVATE ${THC_LIBRARIES})
+  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${THC_LIBRARIES})
 ENDIF()
 
 IF(MPI_FOUND)
   INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
-  TARGET_LINK_LIBRARIES(THD PRIVATE ${MPI_LIBRARIES})
+  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${MPI_LIBRARIES})
 
   IF(MPI_COMPILE_FLAGS)
     SET_TARGET_PROPERTIES(THD PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
@@ -129,7 +153,7 @@ ENDIF()
 
 IF(GLOO_FOUND)
   INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  TARGET_LINK_LIBRARIES(THD PRIVATE ${GLOO_LIBRARIES})
+  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${GLOO_LIBRARIES})
 ENDIF()
 
 # Test executables

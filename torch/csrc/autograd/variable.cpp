@@ -4,15 +4,14 @@
 #include "torch/csrc/utils/auto_gpu.h"
 
 using namespace torch;
-using namespace thpp;
 
 namespace torch { namespace autograd {
 
 Variable::Variable(
-  std::unique_ptr<thpp::Tensor> data,
+  at::Tensor data,
   bool requires_grad,
   bool is_volatile)
-    : data(std::move(data))
+    : data(data)
     , grad_fn(nullptr)
     , grad(nullptr)
     , version_counter(new VariableVersion())
@@ -21,15 +20,15 @@ Variable::Variable(
     , output_nr(0)
     , pyobj(nullptr)
 {
-  if (!this->data) {
+  if (!this->data.defined()) {
     throw std::runtime_error("Variable data is NULL");
   }
 }
 
 Variable::Variable(
-  std::unique_ptr<thpp::Tensor> data,
+  at::Tensor data,
   std::shared_ptr<Function> grad_fn)
-    : data(std::move(data))
+    : data(data)
     , grad_fn(grad_fn)
     , grad(nullptr)
     , version_counter(new VariableVersion())
@@ -38,7 +37,7 @@ Variable::Variable(
     , output_nr(grad_fn->num_inputs++)
     , pyobj(nullptr)
 {
-  if (!this->data) {
+  if (!this->data.defined()) {
     throw std::runtime_error("Variable data is NULL");
   }
 }
@@ -59,8 +58,13 @@ auto Variable::get_grad_accumulator() -> std::shared_ptr<Function> {
   return result;
 }
 
-auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
-  if (!data) return nullptr;
+auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) -> std::shared_ptr<Variable> {
+  if (!data.defined()) {
+    if (version) {
+      throw std::runtime_error(ERR_BACKWARD_TWICE);
+    }
+    return nullptr;
+  }
 
   int current_version = **version;
   if (expected_version != current_version) {
@@ -69,14 +73,14 @@ auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
         "inplace operation");
   }
 
-  auto new_var = std::make_shared<Variable>(
-      std::unique_ptr<thpp::Tensor>(data->clone_shallow()),
-      requires_grad, is_volatile);
-  if (!grad_fn && !weak_grad_fn.expired()) {
-    // there's no risk of race condition here, because weak_grad_fn is
-    // guaranteed to be valid for the entire duration of the call
-    // (of course only if it was used in the first place).
-    new_var->grad_fn = weak_grad_fn.lock();
+  auto new_var = std::make_shared<Variable>(data, requires_grad, is_volatile);
+  if (has_grad_fn && !grad_fn) {
+    if (!saved_for) {
+      // If saving the grad_fn would create a circular reference, then it must
+      // be passed in to the unpack function.
+      throw std::runtime_error("No grad_fn for non-leaf saved variable");
+    }
+    new_var->grad_fn = saved_for;
   } else {
     new_var->grad_fn = grad_fn;
   }
@@ -84,11 +88,16 @@ auto SavedVariable::unpack() -> std::shared_ptr<Variable> {
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
   // should have saved the grad accumulator. Even if the Variable no longer
   // alive, the accumulator should be kept alive by the references in the graph).
-  if (requires_grad && !grad_fn && weak_grad_fn.expired() && grad_accumulator.expired())
+  if (requires_grad && !new_var->grad_fn && grad_accumulator.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
   new_var->grad_accumulator = grad_accumulator;
 
   return new_var;
 }
+
+const char* ERR_BACKWARD_TWICE =
+    "Trying to backward through the graph a second time, but the buffers have "
+    "already been freed. Specify retain_graph=True when calling backward "
+    "the first time.";
 
 }} // namespace torch::autograd

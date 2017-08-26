@@ -63,17 +63,37 @@ auto THCTensor<real>::newSelect(int dimension, long sliceIndex) const -> THCTens
 
 template<>
 auto THCTensor<real>::newNarrow(int dimension, long firstIndex, long size) const -> THCTensor* {
-  throw std::runtime_error("newNarrow is not yet available for CUDA tensors");
+  return new THCTensor(state, THCTensor_(newNarrow)(state, tensor, dimension, firstIndex, size));
 }
 
 template<>
 auto THCTensor<real>::newTranspose(int dimension1, int dimension2) const -> THCTensor* {
-  throw std::runtime_error("newTranspose is not yet available for CUDA tensors");
+  return new THCTensor(state, THCTensor_(newTranspose)(state, tensor, dimension1, dimension2));
 }
 
 template<>
 auto THCTensor<real>::newUnfold(int dimension, long size, long step) const -> THCTensor* {
   throw std::runtime_error("newUnfold is not yet available for CUDA tensors");
+}
+
+template<>
+auto THCTensor<real>::newExpand(const long_range& size) const -> THCTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  // TODO this might leak on error
+  auto expanded = new THCTensor(state, THCTensor_(newExpand)(state, tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return expanded;
+}
+
+template<>
+auto THCTensor<real>::newView(const long_range& size) const -> THCTensor* {
+  THLongStorage *size_storage = THLongStorage_newWithSize(size.size());
+  std::memcpy(size_storage->data, size.data(), sizeof(long) * size.size());
+  // TODO this might leak on error
+  auto viewed = new THCTensor(state, THCTensor_(newView)(state, tensor, size_storage));
+  THLongStorage_free(size_storage);
+  return viewed;
 }
 
 template<>
@@ -902,9 +922,9 @@ auto THCTensor<real>::mean(const Tensor& src, int dimension, int keepdim) -> THC
 }
 
 template<>
-auto THCTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdim) -> THCTensor& {
+auto THCTensor<real>::std(const Tensor& src, int dimension, int biased, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
+  THCTensor_(std)(state, tensor, const_tensor_cast(src).tensor, dimension, biased, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -913,9 +933,9 @@ auto THCTensor<real>::std(const Tensor& src, int dimension, int flag, int keepdi
 }
 
 template<>
-auto THCTensor<real>::var(const Tensor& src, int dimension, int flag, int keepdim) -> THCTensor& {
+auto THCTensor<real>::var(const Tensor& src, int dimension, int biased, int keepdim) -> THCTensor& {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, flag, keepdim);
+  THCTensor_(var)(state, tensor, const_tensor_cast(src).tensor, dimension, biased, keepdim);
   return *this;
 #else
   throw std::runtime_error("floating point functions are available only for\
@@ -1000,9 +1020,9 @@ auto THCTensor<real>::meanall() -> scalar_type {
 }
 
 template<>
-auto THCTensor<real>::varall() -> scalar_type {
+auto THCTensor<real>::varall(int biased) -> scalar_type {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return THCTensor_(varall)(state, tensor);
+  return THCTensor_(varall)(state, tensor, biased);
 #else
   throw std::runtime_error("floating point functions are available only for\
       floating point tensors");
@@ -1010,9 +1030,9 @@ auto THCTensor<real>::varall() -> scalar_type {
 }
 
 template<>
-auto THCTensor<real>::stdall() -> scalar_type {
+auto THCTensor<real>::stdall(int biased) -> scalar_type {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  return THCTensor_(stdall)(state, tensor);
+  return THCTensor_(stdall)(state, tensor, biased);
 #else
   throw std::runtime_error("floating point functions are available only for\
       floating point tensors");
@@ -1255,6 +1275,11 @@ auto THCTensor<real>::minall() -> scalar_type {
 template<>
 auto THCTensor<real>::maxall() -> scalar_type {
   return uncast_scalar(THCTensor_(maxall)(state, tensor));
+}
+
+template<>
+auto THCTensor<real>::medianall() -> scalar_type {
+  return uncast_scalar(THCTensor_(medianall)(state, tensor));
 }
 
 template<>

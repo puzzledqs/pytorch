@@ -44,6 +44,8 @@ public:
   virtual THCSTensor* newNarrow(int dimension, long firstIndex, long size) const override;
   virtual THCSTensor* newTranspose(int dimension1, int dimension2) const override;
   virtual THCSTensor* newUnfold(int dimension, long size, long step) const override;
+  virtual THCSTensor* newExpand(const long_range& size) const override;
+  virtual THCSTensor* newView(const long_range& size) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -172,16 +174,16 @@ public:
   virtual THCSTensor& frac(const Tensor& src) override;
   virtual THCSTensor& lerp(const Tensor& a, const Tensor& b, scalar_type weight) override;
   virtual THCSTensor& mean(const Tensor& src, int dimension, int keepdim) override;
-  virtual THCSTensor& std(const Tensor& src, int dimension, int flag, int keepdim) override;
-  virtual THCSTensor& var(const Tensor& src, int dimension, int flag, int keepdim) override;
+  virtual THCSTensor& std(const Tensor& src, int dimension, int biased, int keepdim) override;
+  virtual THCSTensor& var(const Tensor& src, int dimension, int biased, int keepdim) override;
   virtual THCSTensor& norm(const Tensor& src, scalar_type value, int dimension, int keepdim) override;
   virtual THCSTensor& renorm(const Tensor& src, scalar_type value, int dimension, scalar_type maxnorm) override;
   virtual THCSTensor& histc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
   virtual THCSTensor& bhistc(const Tensor& src, long nbins, scalar_type minvalue, scalar_type maxvalue) override;
   virtual scalar_type dist(const Tensor& src, scalar_type value) override;
   virtual scalar_type meanall() override;
-  virtual scalar_type varall() override;
-  virtual scalar_type stdall() override;
+  virtual scalar_type varall(int biased) override;
+  virtual scalar_type stdall(int biased) override;
   virtual scalar_type normall(scalar_type value) override;
   virtual THCSTensor& linspace(scalar_type a, scalar_type b, long n) override;
   virtual THCSTensor& logspace(scalar_type a, scalar_type b, long n) override;
@@ -243,6 +245,7 @@ public:
   virtual scalar_type dot(const Tensor& source) override;
   virtual scalar_type minall() override;
   virtual scalar_type maxall() override;
+  virtual scalar_type medianall() override;
   virtual scalar_type sumall() override;
   virtual scalar_type prodall() override;
   virtual THCSTensor& neg(const Tensor& src) override;
